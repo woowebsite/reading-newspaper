@@ -245,7 +245,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const generateSummary = useCallback(async () => {
     const prefs = getPreferences();
-    if (!prefs.geminiApiKey) {
+
+    // Check if server has API key configured
+    let hasServerKey = false;
+    try {
+      const statusRes = await fetch('/api/summarize');
+      const statusData = await statusRes.json();
+      hasServerKey = statusData.hasServerKey === true;
+    } catch {
+      // ignore — will fall through to UI key check
+    }
+
+    // Only require UI key if server doesn't have one
+    if (!hasServerKey && !prefs.geminiApiKey) {
       showToast('Vui lòng nhập Gemini API key trong Cài đặt', 'error');
       dispatch({ type: 'TOGGLE_SETTINGS', show: true });
       return;
@@ -253,16 +265,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const articles = getArticles();
     const today = new Date().toISOString().split('T')[0];
-    const todayArticles = articles.filter(a =>
-      a.publishedAt.startsWith(today) || !a.publishedAt
-    ).slice(0, 60);
+    // Include all recent articles (today + yesterday to handle timezone offsets)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    const recentArticles = articles
+      .filter(a => a.publishedAt.startsWith(today) || a.publishedAt.startsWith(yesterdayStr))
+      .slice(0, 60);
+    const todayArticles = recentArticles.length > 0 ? recentArticles : articles.slice(-40);
 
     if (todayArticles.length === 0) {
       showToast('Chưa có bài báo nào để tóm tắt. Hãy tải tin tức trước.', 'info');
       return;
     }
 
-    showToast('Đang tạo tóm tắt AI...', 'info');
+    showToast(`Đang tạo tóm tắt AI cho ${todayArticles.length} bài...`, 'info');
     dispatch({ type: 'SET_LOADING', loading: true });
 
     try {
@@ -282,7 +299,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             favoriteCategories: prefs.favoriteCategories,
             summaryLanguage: prefs.summaryLanguage,
           },
-          apiKey: prefs.geminiApiKey,
+          // Only send UI key if server doesn't have one
+          apiKey: hasServerKey ? undefined : prefs.geminiApiKey,
           date: today,
         }),
       });
@@ -305,7 +323,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       saveSummary(summary);
       dispatch({ type: 'ADD_SUMMARY', summary });
-      showToast('Đã tạo tóm tắt ngày hôm nay!', 'success');
+      showToast(`Đã tạo tóm tắt! (${data.model || 'Gemini'})`, 'success');
       dispatch({ type: 'SET_TAB', tab: 'summary' });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';

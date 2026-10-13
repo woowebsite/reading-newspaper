@@ -9,6 +9,14 @@ export default function SettingsModal() {
   const { state, dispatch, showToast } = useApp();
   const [prefs, setPrefs] = useState<UserPreferences>(() => getPreferences());
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  const [serverStatus, setServerStatus] = useState<{ hasServerKey: boolean; model: string } | null>(null);
+
+  React.useEffect(() => {
+    fetch('/api/summarize')
+      .then(r => r.json())
+      .then(d => setServerStatus(d))
+      .catch(() => {});
+  }, []);
 
   const handleSave = () => {
     savePreferences(prefs);
@@ -32,13 +40,37 @@ export default function SettingsModal() {
         {/* AI API Key */}
         <div className="settings-section">
           <div className="settings-section-title">🤖 Gemini AI</div>
+          {serverStatus?.hasServerKey && (
+            <div style={{
+              background: 'rgba(34, 197, 94, 0.1)',
+              border: '1px solid rgba(34, 197, 94, 0.3)',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              marginBottom: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '13px',
+              color: 'var(--green, #22c55e)'
+            }}>
+              <span>✅</span>
+              <div>
+                <strong>Đã kết nối từ file .env</strong>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Model: {serverStatus.model} — Không cần cấu hình thêm
+                </div>
+              </div>
+            </div>
+          )}
           <div className="input-group">
-            <label className="input-label">API Key (dùng để tạo tóm tắt)</label>
+            <label className="input-label">
+              {serverStatus?.hasServerKey ? 'API Key tùy chỉnh (tùy chọn ghi đè)' : 'API Key (dùng để tạo tóm tắt)'}
+            </label>
             <div className="input-with-btn">
               <input
                 type={apiKeyVisible ? 'text' : 'password'}
                 className="input-field"
-                placeholder="AIza..."
+                placeholder={serverStatus?.hasServerKey ? 'Đang dùng key từ .env (hoặc nhập để ghi đè)' : 'AIza...'}
                 value={prefs.geminiApiKey || ''}
                 onChange={e => setPrefs({ ...prefs, geminiApiKey: e.target.value })}
               />
@@ -54,7 +86,7 @@ export default function SettingsModal() {
               <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">
                 aistudio.google.com
               </a>
-              . Key được lưu cục bộ, không gửi đi đâu.
+              . Key được bảo mật trên máy bạn.
             </p>
           </div>
         </div>

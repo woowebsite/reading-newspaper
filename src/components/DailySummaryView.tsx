@@ -31,6 +31,19 @@ export default function DailySummaryView() {
 
   const dateLabel = format(new Date(), "EEEE, d MMMM yyyy", { locale: vi });
 
+  const [hasServerKey, setHasServerKey] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch('/api/summarize')
+      .then(r => r.json())
+      .then(d => {
+        if (d.hasServerKey) setHasServerKey(true);
+      })
+      .catch(() => {});
+  }, []);
+
+  const hasApiKey = hasServerKey || !!preferences.geminiApiKey;
+
   return (
     <div>
       <div className="section-header">
@@ -96,9 +109,13 @@ export default function DailySummaryView() {
                 💡 Tải tin tức trước, sau đó nhấn "Tạo tóm tắt hôm nay"
               </p>
             )}
-            {!preferences.geminiApiKey && (
+            {!hasApiKey ? (
               <p style={{ fontSize: '13px', color: 'var(--yellow)', marginTop: '8px' }}>
                 ⚠️ Cần nhập Gemini API key trong Cài đặt để sử dụng tính năng này
+              </p>
+            ) : (
+              <p style={{ fontSize: '12px', color: 'var(--green, #22c55e)', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>✨</span> Gemini AI đã sẵn sàng (Model: gemini-3.1-flash-lite)
               </p>
             )}
           </>
