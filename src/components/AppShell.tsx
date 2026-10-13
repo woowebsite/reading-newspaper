@@ -11,6 +11,8 @@ import SettingsModal from '@/components/SettingsModal';
 import ToastContainer from '@/components/ToastContainer';
 import ArticleCard from '@/components/ArticleCard';
 
+import { filterArticlesByActiveSources } from '@/lib/storage';
+
 const TAB_TITLES: Record<string, string> = {
   feed: 'Tin tức',
   summary: 'Tóm tắt AI',
@@ -22,18 +24,28 @@ const TAB_TITLES: Record<string, string> = {
 export default function AppShell() {
   const { state, dispatch, fetchAllFeeds } = useApp();
   const {
-    activeTab, articles, isLoading, isFetching, fetchProgress,
+    activeTab, articles, sources, isLoading, isFetching, fetchProgress,
     searchQuery, showSettings
   } = state;
 
-  const savedArticles = useMemo(
-    () => articles.filter(a => a.isSaved).sort(
-      (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
-    ),
-    [articles]
+  const activeArticles = useMemo(
+    () => filterArticlesByActiveSources(articles, sources),
+    [articles, sources]
   );
 
-  const unreadCount = articles.filter(a => !a.isRead).length;
+  const savedArticles = useMemo(() => {
+    const seen = new Set<string>();
+    return activeArticles
+      .filter(a => a.isSaved)
+      .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+      .filter(a => {
+        if (!a.id || seen.has(a.id)) return false;
+        seen.add(a.id);
+        return true;
+      });
+  }, [activeArticles]);
+
+  const unreadCount = activeArticles.filter(a => !a.isRead).length;
 
   if (isLoading) {
     return (

@@ -4,20 +4,29 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { useApp } from '@/context/AppContext';
 import ArticleCard from './ArticleCard';
 import { NEWS_CATEGORIES } from '@/types';
+import { filterArticlesByActiveSources } from '@/lib/storage';
 
 const ALL = 'Tất cả';
 
 export default function NewsFeed() {
-  const { state, fetchAllFeeds } = useApp();
-  const { articles, isFetching, fetchProgress, searchQuery, selectedCategory, selectedSourceId } = state;
+  const { state, dispatch, fetchAllFeeds } = useApp();
+  const { articles, sources, isFetching, fetchProgress, searchQuery, selectedCategory, selectedSourceId } = state;
 
   const [localCategory, setLocalCategory] = useState(ALL);
   const [showSaved, setShowSaved] = useState(false);
   const [showUnread, setShowUnread] = useState(false);
   const [sortByTime, setSortByTime] = useState(true);
 
+  // Filter only articles belonging to active sources
+  const activeArticles = useMemo(
+    () => filterArticlesByActiveSources(articles, sources),
+    [articles, sources]
+  );
+
+  const hasAnyActiveSource = sources.length === 0 || sources.some(s => s.isActive);
+
   const filteredArticles = useMemo(() => {
-    let result = [...articles];
+    let result = [...activeArticles];
 
     // Filter by saved
     if (showSaved) result = result.filter(a => a.isSaved);
@@ -57,29 +66,63 @@ export default function NewsFeed() {
       return bScore - aScore;
     });
 
-    return result;
-  }, [articles, searchQuery, selectedCategory, localCategory, selectedSourceId, showSaved, showUnread, sortByTime]);
+    // Deduplicate by ID
+    const seen = new Set<string>();
+    return result.filter(a => {
+      if (!a.id || seen.has(a.id)) return false;
+      seen.add(a.id);
+      return true;
+    });
+  }, [activeArticles, searchQuery, selectedCategory, localCategory, selectedSourceId, showSaved, showUnread, sortByTime]);
 
-  // Category counts
+  // Category counts based on active articles only
   const categoryCounts = useMemo(() => {
     const map = new Map<string, number>();
-    map.set(ALL, articles.length);
-    articles.forEach(a => map.set(a.category, (map.get(a.category) || 0) + 1));
+    map.set(ALL, activeArticles.length);
+    activeArticles.forEach(a => map.set(a.category, (map.get(a.category) || 0) + 1));
     return map;
-  }, [articles]);
+  }, [activeArticles]);
 
   const activeCategories = useMemo(() => {
-    const cats = new Set(articles.map(a => a.category));
+    const cats = new Set(activeArticles.map(a => a.category));
     return [ALL, ...NEWS_CATEGORIES.filter(c => cats.has(c))];
-  }, [articles]);
+  }, [activeArticles]);
 
-  if (articles.length === 0 && !isFetching) {
+  // Case 1: All sources are disabled
+  if (!hasAnyActiveSource) {
     return (
       <div>
         <div className="section-header">
           <div>
             <h1 className="section-title">Tin tức hôm nay</h1>
-            <p className="section-subtitle">Chưa có bài báo nào. Hãy tải tin tức!</p>
+            <p className="section-subtitle">Tất cả các nguồn tin đang tắt</p>
+          </div>
+          <button className="btn btn-primary" onClick={() => dispatch({ type: 'SET_TAB', tab: 'sources' })}>
+            📡 Quản lý nguồn
+          </button>
+        </div>
+        <div className="empty-state">
+          <div className="empty-icon">📴</div>
+          <h2 className="empty-title">Các nguồn tin đều đang tắt</h2>
+          <p className="empty-subtitle">
+            Bạn đã tắt tất cả các nguồn báo. Hãy bật lại ít nhất một nguồn tin trong tab <strong>Nguồn</strong> để xem bài viết.
+          </p>
+          <button className="btn btn-primary" onClick={() => dispatch({ type: 'SET_TAB', tab: 'sources' })}>
+            📡 Bật lại nguồn tin
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Case 2: No articles yet
+  if (activeArticles.length === 0 && !isFetching) {
+    return (
+      <div>
+        <div className="section-header">
+          <div>
+            <h1 className="section-title">Tin tức hôm nay</h1>
+            <p className="section-subtitle">Chưa có bài báo nào từ các nguồn đang bật.</p>
           </div>
           <button className="btn btn-primary" onClick={fetchAllFeeds}>
             <span>⟳</span> Tải tin tức
@@ -87,14 +130,19 @@ export default function NewsFeed() {
         </div>
         <div className="empty-state">
           <div className="empty-icon">📰</div>
-          <h2 className="empty-title">Chưa có bài báo nào</h2>
+          <h2 className="empty-title">Chưa có tin từ nguồn đang bật</h2>
           <p className="empty-subtitle">
-            Nhấn "Tải tin tức" để lấy bài mới từ các nguồn đã thêm,
-            hoặc thêm nguồn mới trong tab <strong>Nguồn</strong>.
+            Nhấn "Tải tin tức" để lấy bài mới từ các nguồn đang hoạt động,
+            hoặc bật lại các nguồn khác trong tab <strong>Nguồn</strong>.
           </p>
-          <button className="btn btn-primary" onClick={fetchAllFeeds}>
-            ⟳ Tải ngay
-          </button>
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+            <button className="btn btn-primary" onClick={fetchAllFeeds}>
+              ⟳ Tải ngay
+            </button>
+            <button className="btn btn-secondary" onClick={() => dispatch({ type: 'SET_TAB', tab: 'sources' })}>
+              📡 Quản lý nguồn
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -107,7 +155,7 @@ export default function NewsFeed() {
         <div>
           <h1 className="section-title">Tin tức hôm nay</h1>
           <p className="section-subtitle">
-            {filteredArticles.length} bài • {articles.filter(a => !a.isRead).length} chưa đọc
+            {filteredArticles.length} bài • {activeArticles.filter(a => !a.isRead).length} chưa đọc
           </p>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>

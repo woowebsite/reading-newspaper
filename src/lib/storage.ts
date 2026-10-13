@@ -49,7 +49,44 @@ export function removeSource(id: string): void {
   saveSources(sources);
 }
 
+export function normalizeDomain(d?: string): string {
+  if (!d) return '';
+  return d.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+}
+
+export function filterArticlesByActiveSources(articles: NewsArticle[], sources: NewsSource[]): NewsArticle[] {
+  if (!sources || sources.length === 0) return articles;
+
+  const sourceMapById = new Map<string, boolean>();
+  const sourceMapByDomain = new Map<string, boolean>();
+
+  sources.forEach(s => {
+    sourceMapById.set(s.id, s.isActive);
+    const dom = normalizeDomain(s.domain);
+    if (dom) sourceMapByDomain.set(dom, s.isActive);
+  });
+
+  return articles.filter(a => {
+    if (a.sourceId && sourceMapById.has(a.sourceId)) {
+      return sourceMapById.get(a.sourceId) === true;
+    }
+    const aDomain = normalizeDomain(a.sourceDomain);
+    if (aDomain && sourceMapByDomain.has(aDomain)) {
+      return sourceMapByDomain.get(aDomain) === true;
+    }
+    return false;
+  });
+}
+
 // ── Articles ─────────────────────────────────────────────────────────────────
+
+function hashString(str: string): string {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h).toString(36);
+}
 
 function safeStr(val: unknown): string {
   if (val === null || val === undefined) return '';
@@ -81,7 +118,40 @@ export function getArticles(): NewsArticle[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.ARTICLES);
     const parsed: NewsArticle[] = raw ? JSON.parse(raw) : [];
-    return parsed.map(sanitizeArticle);
+    
+    const seenIds = new Set<string>();
+    const seenUrls = new Set<string>();
+    const cleaned: NewsArticle[] = [];
+    let needsResave = false;
+
+    for (const rawArticle of parsed) {
+      const a = sanitizeArticle(rawArticle);
+
+      // Deduplicate identical articles by URL
+      const normUrl = a.url ? a.url.trim().toLowerCase() : '';
+      if (normUrl && seenUrls.has(normUrl)) {
+        needsResave = true;
+        continue;
+      }
+      if (normUrl) seenUrls.add(normUrl);
+
+      // Fix ID collisions (e.g. stale truncated base64 keys)
+      let id = a.id;
+      if (!id || seenIds.has(id)) {
+        needsResave = true;
+        const seed = a.url || `${a.sourceId}:${a.title}`;
+        id = `${hashString(seed)}-${Math.random().toString(36).slice(2, 7)}`;
+        a.id = id;
+      }
+      seenIds.add(id);
+      cleaned.push(a);
+    }
+
+    if (needsResave) {
+      localStorage.setItem(STORAGE_KEYS.ARTICLES, JSON.stringify(cleaned));
+    }
+
+    return cleaned;
   } catch {
     return [];
   }
@@ -89,15 +159,44 @@ export function getArticles(): NewsArticle[] {
 
 export function saveArticles(articles: NewsArticle[]): void {
   if (typeof window === 'undefined') return;
+  const seenIds = new Set<string>();
+  const unique: NewsArticle[] = [];
+
+  for (const item of articles) {
+    const a = { ...item };
+    let id = a.id;
+    if (!id || seenIds.has(id)) {
+      id = `${id || 'art'}-${Math.random().toString(36).slice(2, 7)}`;
+      a.id = id;
+    }
+    seenIds.add(id);
+    unique.push(a);
+  }
+
   // Keep only last 500 articles to avoid storage bloat
-  const trimmed = articles.slice(-500);
+  const trimmed = unique.slice(-500);
   localStorage.setItem(STORAGE_KEYS.ARTICLES, JSON.stringify(trimmed));
 }
 
 export function mergeArticles(newArticles: NewsArticle[]): void {
   const existing = getArticles();
   const existingIds = new Set(existing.map(a => a.id));
-  const toAdd = newArticles.filter(a => !existingIds.has(a.id));
+  const existingUrls = new Set(existing.map(a => a.url?.trim().toLowerCase()).filter(Boolean));
+
+  const toAdd: NewsArticle[] = [];
+  for (const item of newArticles) {
+    const normUrl = item.url ? item.url.trim().toLowerCase() : '';
+    if (normUrl && existingUrls.has(normUrl)) continue;
+
+    const cloned = { ...item };
+    if (existingIds.has(cloned.id)) {
+      cloned.id = `${cloned.id}-${Math.random().toString(36).slice(2, 7)}`;
+    }
+    existingIds.add(cloned.id);
+    if (normUrl) existingUrls.add(normUrl);
+    toAdd.push(cloned);
+  }
+
   saveArticles([...existing, ...toAdd]);
 }
 

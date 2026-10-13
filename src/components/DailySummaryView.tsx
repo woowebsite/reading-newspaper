@@ -5,6 +5,7 @@ import { useApp } from '@/context/AppContext';
 import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { SummaryHighlight } from '@/types';
+import { filterArticlesByActiveSources } from '@/lib/storage';
 
 function ImportanceBadge({ importance }: { importance: 'high' | 'medium' | 'low' }) {
   const map = {
@@ -20,14 +21,19 @@ function ImportanceBadge({ importance }: { importance: 'high' | 'medium' | 'low'
 
 export default function DailySummaryView() {
   const { state, generateSummary } = useApp();
-  const { summaries, articles, isLoading, preferences } = state;
+  const { summaries, articles, sources, isLoading, preferences } = state;
 
   const today = new Date().toISOString().split('T')[0];
   const todaySummary = summaries.find(s => s.date === today);
   const pastSummaries = summaries.filter(s => s.date !== today).sort((a, b) => b.date.localeCompare(a.date));
 
-  const todayArticleCount = articles.filter(a => a.publishedAt?.startsWith(today)).length;
-  const readToday = articles.filter(a => a.isRead && a.readAt?.startsWith(today)).length;
+  const activeArticles = React.useMemo(
+    () => filterArticlesByActiveSources(articles, sources),
+    [articles, sources]
+  );
+
+  const todayArticleCount = activeArticles.filter(a => a.publishedAt?.startsWith(today)).length;
+  const readToday = activeArticles.filter(a => a.isRead && a.readAt?.startsWith(today)).length;
 
   const dateLabel = format(new Date(), "EEEE, d MMMM yyyy", { locale: vi });
 

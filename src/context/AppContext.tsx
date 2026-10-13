@@ -9,7 +9,8 @@ import {
   getArticles, mergeArticles, updateArticle as updateArticleStorage,
   getPreferences, updatePreferences,
   getSummaries, saveSummary, getTodaySummary,
-  computeReadingStats, setLastFetchTime, getLastFetchTime
+  computeReadingStats, setLastFetchTime, getLastFetchTime,
+  filterArticlesByActiveSources
 } from '@/lib/storage';
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -73,10 +74,30 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case 'REMOVE_SOURCE':
       return { ...state, sources: state.sources.filter(s => s.id !== action.id) };
-    case 'SET_ARTICLES': return { ...state, articles: action.articles };
+    case 'SET_ARTICLES': {
+      const seen = new Set<string>();
+      const unique = action.articles.filter(a => {
+        if (!a.id || seen.has(a.id)) return false;
+        seen.add(a.id);
+        return true;
+      });
+      return { ...state, articles: unique };
+    }
     case 'MERGE_ARTICLES': {
       const existingIds = new Set(state.articles.map(a => a.id));
-      const newOnes = action.articles.filter(a => !existingIds.has(a.id));
+      const existingUrls = new Set(state.articles.map(a => a.url?.trim().toLowerCase()).filter(Boolean));
+      const newOnes: NewsArticle[] = [];
+      for (const a of action.articles) {
+        const normUrl = a.url ? a.url.trim().toLowerCase() : '';
+        if (normUrl && existingUrls.has(normUrl)) continue;
+        let id = a.id;
+        if (existingIds.has(id)) {
+          id = `${id}-${Math.random().toString(36).slice(2, 7)}`;
+        }
+        existingIds.add(id);
+        if (normUrl) existingUrls.add(normUrl);
+        newOnes.push({ ...a, id });
+      }
       return { ...state, articles: [...state.articles, ...newOnes] };
     }
     case 'UPDATE_ARTICLE':
@@ -263,7 +284,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const articles = getArticles();
+    const allArticles = getArticles();
+    const currentSources = getSources();
+    const articles = filterArticlesByActiveSources(allArticles, currentSources);
     const today = new Date().toISOString().split('T')[0];
     // Include all recent articles (today + yesterday to handle timezone offsets)
     const yesterday = new Date();
